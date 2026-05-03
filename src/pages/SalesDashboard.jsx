@@ -81,7 +81,6 @@ const SalesDashboard = () => {
 
       const shiftData = {
         salesman_name: formData.salesmanName,
-        booth_number: parseInt(formData.boothNumber),
         start_reading: parseFloat(formData.meterReading),
         start_photo_url: photoUrl,
         start_time: new Date().toISOString(),
