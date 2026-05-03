@@ -1,65 +1,174 @@
-import React, { useState } from 'react';
-import { Camera, User, Play, Square, CheckCircle2, AlertCircle, ArrowRight, Image as ImageIcon } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Camera, User, Play, CheckCircle2, AlertCircle, ArrowRight, X, ImageIcon } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
-const CNG_PRICE_PER_KG = 300; // Define current CNG price
+const CNG_PRICE_PER_KG = 300;
 
 const SalesDashboard = () => {
-  // Simulate active shift in local storage or state
   const [activeShift, setActiveShift] = useState(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
-  
-  // Form State
+  const [showSuccess, setShowSuccess] = useState(false);
+
   const [formData, setFormData] = useState({
     salesmanName: '',
     meterReading: '',
-    photoTaken: false
+    photo: null,
+    photoPreview: null
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const fileInputRef = useRef(null);
 
-  const handlePhotoClick = () => {
-    // Simulate opening camera and capturing
-    setFormData(prev => ({ ...prev, photoTaken: true }));
+  // Check for active shift on load
+  useEffect(() => {
+    const saved = localStorage.getItem('activeShift');
+    if (saved) {
+      setActiveShift(JSON.parse(saved));
+    }
+  }, []);
+
+  const handlePhotoCapture = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const previewUrl = URL.createObjectURL(file);
+      setFormData(prev => ({
+        ...prev,
+        photo: file,
+        photoPreview: previewUrl
+      }));
+    }
   };
 
-  const handleStartShift = (e) => {
+  const removePhoto = () => {
+    if (formData.photoPreview) {
+      URL.revokeObjectURL(formData.photoPreview);
+    }
+    setFormData(prev => ({ ...prev, photo: null, photoPreview: null }));
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const uploadPhoto = async (file, shiftId, type) => {
+    const fileName = `${shiftId}_${type}_${Date.now()}.jpg`;
+    const { data, error } = await supabase.storage
+      .from('meter-photos')
+      .upload(fileName, file, { contentType: file.type });
+
+    if (error) {
+      console.error('Upload error:', error);
+      return null;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from('meter-photos')
+      .getPublicUrl(fileName);
+
+    return urlData.publicUrl;
+  };
+
+  const handleStartShift = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
-    
-    setTimeout(() => {
-      setActiveShift({
+
+    try {
+      const shiftId = `shift_${Date.now()}`;
+      let photoUrl = null;
+
+      if (formData.photo) {
+        photoUrl = await uploadPhoto(formData.photo, shiftId, 'start');
+      }
+
+      const shiftData = {
+        salesman_name: formData.salesmanName,
+        start_reading: parseFloat(formData.meterReading),
+        start_photo_url: photoUrl,
+        start_time: new Date().toISOString(),
+        status: 'active'
+      };
+
+      const { data, error } = await supabase
+        .from('shifts')
+        .insert([shiftData])
+        .select();
+
+      if (error) throw error;
+
+      const shift = {
+        id: data[0].id,
         salesmanName: formData.salesmanName,
         startReading: parseFloat(formData.meterReading),
         startTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         startDate: new Date().toLocaleDateString()
-      });
-      setFormData({ salesmanName: '', meterReading: '', photoTaken: false });
-      setIsSubmitting(false);
-    }, 800);
+      };
+
+      setActiveShift(shift);
+      localStorage.setItem('activeShift', JSON.stringify(shift));
+      setFormData({ salesmanName: '', meterReading: '', photo: null, photoPreview: null });
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (err) {
+      console.error('Error starting shift:', err);
+      // Fallback: save locally if Supabase is not configured
+      const shift = {
+        id: `local_${Date.now()}`,
+        salesmanName: formData.salesmanName,
+        startReading: parseFloat(formData.meterReading),
+        startTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        startDate: new Date().toLocaleDateString()
+      };
+      setActiveShift(shift);
+      localStorage.setItem('activeShift', JSON.stringify(shift));
+      setFormData({ salesmanName: '', meterReading: '', photo: null, photoPreview: null });
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+
+    setIsSubmitting(false);
   };
 
   const handleEndShiftPreview = (e) => {
     e.preventDefault();
     const endReading = parseFloat(formData.meterReading);
     if (endReading <= activeShift.startReading) {
-      alert("Ending meter reading must be greater than starting reading.");
+      alert('Ending meter reading must be greater than starting reading.');
       return;
     }
     setShowConfirmation(true);
   };
 
-  const handleConfirmEndShift = () => {
+  const handleConfirmEndShift = async () => {
     setIsSubmitting(true);
-    
-    setTimeout(() => {
-      // Simulate saving to backend
-      setActiveShift(null);
-      setShowConfirmation(false);
-      setFormData({ salesmanName: '', meterReading: '', photoTaken: false });
-      setIsSubmitting(false);
-      
-      // Optional: show a temporary global success toast here
-    }, 1200);
+
+    try {
+      const endReading = parseFloat(formData.meterReading);
+      const kgSold = endReading - activeShift.startReading;
+      const revenue = kgSold * CNG_PRICE_PER_KG;
+
+      let photoUrl = null;
+      if (formData.photo) {
+        photoUrl = await uploadPhoto(formData.photo, activeShift.id, 'end');
+      }
+
+      await supabase
+        .from('shifts')
+        .update({
+          end_reading: endReading,
+          end_photo_url: photoUrl,
+          end_time: new Date().toISOString(),
+          kg_sold: kgSold,
+          revenue: revenue,
+          status: 'completed'
+        })
+        .eq('id', activeShift.id);
+    } catch (err) {
+      console.error('Error ending shift:', err);
+    }
+
+    setActiveShift(null);
+    localStorage.removeItem('activeShift');
+    setShowConfirmation(false);
+    setFormData({ salesmanName: '', meterReading: '', photo: null, photoPreview: null });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    setIsSubmitting(false);
+    setShowSuccess(true);
+    setTimeout(() => setShowSuccess(false), 4000);
   };
 
   const calculatePreview = () => {
@@ -70,8 +179,22 @@ const SalesDashboard = () => {
     return { kgSold: kgSold.toFixed(2), revenue: revenue.toLocaleString() };
   };
 
+  // Hidden file input for camera
+  const CameraInput = () => (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept="image/*"
+      capture="environment"
+      onChange={handlePhotoCapture}
+      style={{ display: 'none' }}
+    />
+  );
+
   return (
-    <div style={{ maxWidth: '500px', margin: '0 auto', padding: '24px' }} className="animate-fade-in">
+    <div style={{ maxWidth: '500px', margin: '0 auto', padding: '24px', minHeight: '100vh' }} className="animate-fade-in">
+      <CameraInput />
+
       <header style={{ textAlign: 'center', marginBottom: '40px' }}>
         <h1 style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.02em', marginBottom: '8px' }}>
           Green Hill <span style={{ color: 'var(--primary)' }}>CNG</span>
@@ -81,12 +204,32 @@ const SalesDashboard = () => {
         </p>
       </header>
 
-      {!activeShift ? (
+      {/* SUCCESS ANIMATION */}
+      {showSuccess && (
+        <div className="glass-panel animate-fade-in" style={{ 
+          padding: '48px 32px', textAlign: 'center', marginBottom: '24px',
+          border: '1px solid var(--primary)'
+        }}>
+          <div style={{
+            width: '80px', height: '80px', borderRadius: '50%',
+            background: 'rgba(0, 210, 106, 0.15)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px',
+            animation: 'pulse 1.5s ease infinite'
+          }}>
+            <CheckCircle2 size={48} color="var(--primary)" />
+          </div>
+          <h2 style={{ fontSize: '1.5rem', marginBottom: '8px' }}>Shift Saved Successfully!</h2>
+          <p style={{ color: 'var(--text-muted)' }}>All data has been recorded.</p>
+        </div>
+      )}
+
+      {/* START SHIFT FORM */}
+      {!activeShift && !showSuccess && (
         <form onSubmit={handleStartShift} className="glass-panel" style={{ padding: '32px' }}>
           <div style={{ marginBottom: '24px', textAlign: 'center' }}>
-            <div style={{ 
-              width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(0, 210, 106, 0.1)', 
-              display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' 
+            <div style={{
+              width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(0, 210, 106, 0.1)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px'
             }}>
               <Play size={28} color="var(--primary)" style={{ marginLeft: '4px' }} />
             </div>
@@ -97,13 +240,13 @@ const SalesDashboard = () => {
             <label className="input-label">Shift In-charge (Salesman)</label>
             <div style={{ position: 'relative' }}>
               <User size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-              <input 
-                type="text" 
-                className="input-field" 
+              <input
+                type="text"
+                className="input-field"
                 style={{ paddingLeft: '44px' }}
                 placeholder="Enter your name"
                 value={formData.salesmanName}
-                onChange={(e) => setFormData({...formData, salesmanName: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, salesmanName: e.target.value })}
                 required
               />
             </div>
@@ -111,66 +254,97 @@ const SalesDashboard = () => {
 
           <div style={{ marginBottom: '24px' }}>
             <label className="input-label">Starting Meter Reading</label>
-            <div style={{ position: 'relative' }}>
-              <input 
-                type="number" 
-                step="0.01"
-                className="input-field" 
-                placeholder="e.g. 10450.5"
-                value={formData.meterReading}
-                onChange={(e) => setFormData({...formData, meterReading: e.target.value})}
-                required
-              />
-            </div>
+            <input
+              type="number"
+              step="0.01"
+              className="input-field"
+              placeholder="e.g. 10450.5"
+              value={formData.meterReading}
+              onChange={(e) => setFormData({ ...formData, meterReading: e.target.value })}
+              required
+            />
           </div>
 
+          {/* PHOTO SECTION */}
           <div style={{ marginBottom: '32px' }}>
-             <button 
+            {formData.photoPreview ? (
+              <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--primary)' }}>
+                <img
+                  src={formData.photoPreview}
+                  alt="Meter reading"
+                  style={{ width: '100%', height: '200px', objectFit: 'cover', display: 'block' }}
+                />
+                <div style={{
+                  position: 'absolute', bottom: 0, left: 0, right: 0,
+                  background: 'linear-gradient(transparent, rgba(0,0,0,0.8))',
+                  padding: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                }}>
+                  <span style={{ color: 'var(--primary)', fontWeight: 600, fontSize: '0.875rem' }}>
+                    <CheckCircle2 size={16} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
+                    Photo Captured
+                  </span>
+                  <button
+                    type="button"
+                    onClick={removePhoto}
+                    style={{
+                      background: 'rgba(255,71,87,0.2)', border: '1px solid var(--danger)',
+                      color: 'var(--danger)', borderRadius: '8px', padding: '6px 12px',
+                      cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px'
+                    }}
+                  >
+                    <X size={14} /> Retake
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
                 type="button"
-                onClick={handlePhotoClick}
+                onClick={() => fileInputRef.current?.click()}
                 style={{
-                  width: '100%',
-                  padding: '16px',
-                  background: formData.photoTaken ? 'rgba(0, 210, 106, 0.1)' : 'var(--surface-hover)',
-                  border: formData.photoTaken ? '1px solid var(--primary)' : '1px dashed var(--border)',
-                  color: formData.photoTaken ? 'var(--primary)' : 'var(--text-main)',
-                  borderRadius: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '10px',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s'
+                  width: '100%', padding: '24px', background: 'var(--surface-hover)',
+                  border: '2px dashed var(--border)', borderRadius: '12px',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  gap: '10px', cursor: 'pointer', transition: 'all 0.2s',
+                  color: 'var(--text-main)'
                 }}
               >
-                {formData.photoTaken ? <CheckCircle2 size={20} /> : <Camera size={20} />}
-                <span style={{ fontWeight: 500 }}>
-                  {formData.photoTaken ? 'Meter Photo Captured' : 'Take Photo of Meter'}
-                </span>
+                <Camera size={32} color="var(--primary)" />
+                <span style={{ fontWeight: 600 }}>Take Photo of Meter</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Tap to open camera</span>
               </button>
-              {!formData.photoTaken && (
-                <p style={{ fontSize: '0.75rem', color: 'var(--danger)', marginTop: '8px', textAlign: 'center' }}>
-                  * Photo verification is mandatory
-                </p>
-              )}
+            )}
+            {!formData.photoPreview && (
+              <p style={{ fontSize: '0.75rem', color: 'var(--danger)', marginTop: '8px', textAlign: 'center' }}>
+                * Photo verification is mandatory
+              </p>
+            )}
           </div>
 
-          <button 
-            type="submit" 
-            className="btn btn-primary" 
+          <button
+            type="submit"
+            className="btn btn-primary"
             style={{ width: '100%', padding: '16px', fontSize: '1.1rem' }}
-            disabled={isSubmitting || !formData.photoTaken}
+            disabled={isSubmitting || !formData.photoPreview}
           >
             {isSubmitting ? 'Starting Shift...' : 'Start Shift'}
           </button>
         </form>
-      ) : showConfirmation ? (
+      )}
+
+      {/* CONFIRMATION SCREEN */}
+      {activeShift && showConfirmation && (
         <div className="glass-panel animate-fade-in" style={{ padding: '32px' }}>
           <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-             <AlertCircle size={48} color="var(--warning)" style={{ margin: '0 auto 16px' }} />
-             <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Confirm Shift End</h2>
-             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Please verify the calculations before saving.</p>
+            <AlertCircle size={48} color="var(--warning)" style={{ margin: '0 auto 16px' }} />
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Confirm Shift End</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Verify the calculations before saving.</p>
           </div>
+
+          {formData.photoPreview && (
+            <div style={{ marginBottom: '20px', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)' }}>
+              <img src={formData.photoPreview} alt="End meter" style={{ width: '100%', height: '160px', objectFit: 'cover', display: 'block' }} />
+            </div>
+          )}
 
           <div style={{ background: 'var(--surface-hover)', borderRadius: '12px', padding: '20px', marginBottom: '24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>
@@ -196,37 +370,25 @@ const SalesDashboard = () => {
           </div>
 
           <div style={{ display: 'flex', gap: '12px' }}>
-            <button 
-              type="button"
-              className="btn btn-outline"
-              style={{ flex: 1 }}
-              onClick={() => setShowConfirmation(false)}
-              disabled={isSubmitting}
-            >
-              Back to Edit
+            <button type="button" className="btn btn-outline" style={{ flex: 1 }}
+              onClick={() => setShowConfirmation(false)} disabled={isSubmitting}>
+              Back
             </button>
-            <button 
-              type="button"
-              className="btn btn-primary"
-              style={{ flex: 1 }}
-              onClick={handleConfirmEndShift}
-              disabled={isSubmitting}
-            >
+            <button type="button" className="btn btn-primary" style={{ flex: 1 }}
+              onClick={handleConfirmEndShift} disabled={isSubmitting}>
               {isSubmitting ? 'Saving...' : 'Confirm & Save'}
             </button>
           </div>
         </div>
-      ) : (
+      )}
+
+      {/* END SHIFT FORM */}
+      {activeShift && !showConfirmation && !showSuccess && (
         <form onSubmit={handleEndShiftPreview} className="glass-panel animate-fade-in" style={{ padding: '32px' }}>
-          <div style={{ 
-            background: 'rgba(0, 210, 106, 0.05)', 
-            border: '1px solid var(--primary-glow)', 
-            borderRadius: '12px', 
-            padding: '16px',
-            marginBottom: '24px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center'
+          <div style={{
+            background: 'rgba(0, 210, 106, 0.05)', border: '1px solid rgba(0, 210, 106, 0.3)',
+            borderRadius: '12px', padding: '16px', marginBottom: '24px',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center'
           }}>
             <div>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Active Shift</p>
@@ -240,60 +402,70 @@ const SalesDashboard = () => {
 
           <div style={{ marginBottom: '24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-               <label className="input-label" style={{ marginBottom: 0 }}>Starting Reading</label>
-               <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>{activeShift.startReading}</span>
+              <label className="input-label" style={{ marginBottom: 0 }}>Starting Reading</label>
+              <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>{activeShift.startReading}</span>
             </div>
             <label className="input-label" style={{ marginTop: '16px' }}>Ending Meter Reading</label>
-            <div style={{ position: 'relative' }}>
-              <input 
-                type="number" 
-                step="0.01"
-                className="input-field" 
-                placeholder="Enter current meter reading"
-                value={formData.meterReading}
-                onChange={(e) => setFormData({...formData, meterReading: e.target.value})}
-                required
-              />
-            </div>
+            <input
+              type="number"
+              step="0.01"
+              className="input-field"
+              placeholder="Enter current meter reading"
+              value={formData.meterReading}
+              onChange={(e) => setFormData({ ...formData, meterReading: e.target.value })}
+              required
+            />
           </div>
 
+          {/* END SHIFT PHOTO */}
           <div style={{ marginBottom: '32px' }}>
-             <button 
-                type="button"
-                onClick={handlePhotoClick}
+            {formData.photoPreview ? (
+              <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--primary)' }}>
+                <img src={formData.photoPreview} alt="End meter reading"
+                  style={{ width: '100%', height: '200px', objectFit: 'cover', display: 'block' }} />
+                <div style={{
+                  position: 'absolute', bottom: 0, left: 0, right: 0,
+                  background: 'linear-gradient(transparent, rgba(0,0,0,0.8))',
+                  padding: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                }}>
+                  <span style={{ color: 'var(--primary)', fontWeight: 600, fontSize: '0.875rem' }}>
+                    <CheckCircle2 size={16} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
+                    End Photo Captured
+                  </span>
+                  <button type="button" onClick={removePhoto}
+                    style={{
+                      background: 'rgba(255,71,87,0.2)', border: '1px solid var(--danger)',
+                      color: 'var(--danger)', borderRadius: '8px', padding: '6px 12px',
+                      cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px'
+                    }}>
+                    <X size={14} /> Retake
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" onClick={() => fileInputRef.current?.click()}
                 style={{
-                  width: '100%',
-                  padding: '16px',
-                  background: formData.photoTaken ? 'rgba(0, 210, 106, 0.1)' : 'var(--surface-hover)',
-                  border: formData.photoTaken ? '1px solid var(--primary)' : '1px dashed var(--border)',
-                  color: formData.photoTaken ? 'var(--primary)' : 'var(--text-main)',
-                  borderRadius: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '10px',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s'
-                }}
-              >
-                {formData.photoTaken ? <CheckCircle2 size={20} /> : <Camera size={20} />}
-                <span style={{ fontWeight: 500 }}>
-                  {formData.photoTaken ? 'End Meter Photo Captured' : 'Take Photo of End Meter'}
-                </span>
+                  width: '100%', padding: '24px', background: 'var(--surface-hover)',
+                  border: '2px dashed var(--border)', borderRadius: '12px',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  gap: '10px', cursor: 'pointer', transition: 'all 0.2s',
+                  color: 'var(--text-main)'
+                }}>
+                <Camera size={32} color="var(--primary)" />
+                <span style={{ fontWeight: 600 }}>Take Photo of End Meter</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Tap to open camera</span>
               </button>
-              {!formData.photoTaken && (
-                <p style={{ fontSize: '0.75rem', color: 'var(--danger)', marginTop: '8px', textAlign: 'center' }}>
-                  * End-of-shift photo verification is mandatory
-                </p>
-              )}
+            )}
+            {!formData.photoPreview && (
+              <p style={{ fontSize: '0.75rem', color: 'var(--danger)', marginTop: '8px', textAlign: 'center' }}>
+                * End-of-shift photo is mandatory
+              </p>
+            )}
           </div>
 
-          <button 
-            type="submit" 
-            className="btn" 
+          <button type="submit" className="btn"
             style={{ width: '100%', padding: '16px', fontSize: '1.1rem', background: '#e74c3c', color: '#fff' }}
-            disabled={!formData.photoTaken}
-          >
+            disabled={!formData.photoPreview}>
             Review & End Shift <ArrowRight size={20} style={{ marginLeft: '8px' }} />
           </button>
         </form>
