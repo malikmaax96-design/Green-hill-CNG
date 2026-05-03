@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import {
   TrendingUp, Droplets, DollarSign, Activity, CheckCircle2, Calendar,
-  User, Clock, Lock, LogOut, Image as ImageIcon, X
+  User, Clock, Lock, LogOut, Image as ImageIcon, X, Fuel
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -196,9 +196,9 @@ const AdminDashboard = () => {
 
   const loadSampleData = () => {
     const sampleShifts = [
-      { id: 1, salesman_name: 'Ahmad Khan', start_reading: 45012.5, end_reading: 45212.5, start_time: new Date().toISOString(), end_time: new Date().toISOString(), kg_sold: 200, revenue: 60000, status: 'completed', start_photo_url: null, end_photo_url: null },
-      { id: 2, salesman_name: 'Raza Ali', start_reading: 44812.5, end_reading: 45012.5, start_time: new Date(Date.now() - 86400000).toISOString(), end_time: new Date(Date.now() - 86400000).toISOString(), kg_sold: 200, revenue: 60000, status: 'completed', start_photo_url: null, end_photo_url: null },
-      { id: 3, salesman_name: 'Tariq Mehmood', start_reading: 44652.5, end_reading: 44812.5, start_time: new Date(Date.now() - 86400000).toISOString(), end_time: new Date(Date.now() - 86400000).toISOString(), kg_sold: 160, revenue: 48000, status: 'completed', start_photo_url: null, end_photo_url: null },
+      { id: 1, salesman_name: 'Ahmad Khan', booth_number: 1, start_reading: 45012.5, end_reading: 45212.5, start_time: new Date().toISOString(), end_time: new Date().toISOString(), kg_sold: 200, revenue: 60000, status: 'completed', start_photo_url: null, end_photo_url: null },
+      { id: 2, salesman_name: 'Raza Ali', booth_number: 2, start_reading: 44812.5, end_reading: 45012.5, start_time: new Date(Date.now() - 86400000).toISOString(), end_time: new Date(Date.now() - 86400000).toISOString(), kg_sold: 200, revenue: 60000, status: 'completed', start_photo_url: null, end_photo_url: null },
+      { id: 3, salesman_name: 'Tariq Mehmood', booth_number: 3, start_reading: 44652.5, end_reading: 44812.5, start_time: new Date(Date.now() - 86400000).toISOString(), end_time: new Date(Date.now() - 86400000).toISOString(), kg_sold: 160, revenue: 48000, status: 'completed', start_photo_url: null, end_photo_url: null },
     ];
     setShifts(sampleShifts);
     setStats({ totalRevenue: 168000, totalKg: 560, activeShifts: 0, completedShifts: 3 });
@@ -310,7 +310,18 @@ const AdminDashboard = () => {
                       <User size={20} />
                     </div>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '1rem' }}>{shift.salesman_name}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: 600, fontSize: '1rem' }}>{shift.salesman_name}</span>
+                        {shift.booth_number && (
+                          <span style={{
+                            fontSize: '0.7rem', fontWeight: 600, padding: '2px 8px', borderRadius: '6px',
+                            background: 'rgba(0, 210, 106, 0.15)', color: '#00d26a',
+                            display: 'inline-flex', alignItems: 'center', gap: '3px'
+                          }}>
+                            <Fuel size={10} /> Booth {shift.booth_number}
+                          </span>
+                        )}
+                      </div>
                       <div style={{ color: '#94a39b', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <Clock size={12} /> {formatDate(shift.start_time)} • {formatTime(shift.start_time)} - {formatTime(shift.end_time)}
                       </div>

@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, User, Play, CheckCircle2, AlertCircle, ArrowRight, X, ImageIcon } from 'lucide-react';
+import { Camera, User, Play, CheckCircle2, AlertCircle, ArrowRight, X, Fuel } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 const CNG_PRICE_PER_KG = 300;
+const BOOTHS = [1, 2, 3, 4];
 
 const SalesDashboard = () => {
   const [activeShift, setActiveShift] = useState(null);
@@ -11,6 +12,7 @@ const SalesDashboard = () => {
 
   const [formData, setFormData] = useState({
     salesmanName: '',
+    boothNumber: '',
     meterReading: '',
     photo: null,
     photoPreview: null
@@ -79,6 +81,7 @@ const SalesDashboard = () => {
 
       const shiftData = {
         salesman_name: formData.salesmanName,
+        booth_number: parseInt(formData.boothNumber),
         start_reading: parseFloat(formData.meterReading),
         start_photo_url: photoUrl,
         start_time: new Date().toISOString(),
@@ -95,6 +98,7 @@ const SalesDashboard = () => {
       const shift = {
         id: data[0].id,
         salesmanName: formData.salesmanName,
+        boothNumber: formData.boothNumber,
         startReading: parseFloat(formData.meterReading),
         startTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         startDate: new Date().toLocaleDateString()
@@ -102,7 +106,7 @@ const SalesDashboard = () => {
 
       setActiveShift(shift);
       localStorage.setItem('activeShift', JSON.stringify(shift));
-      setFormData({ salesmanName: '', meterReading: '', photo: null, photoPreview: null });
+      setFormData({ salesmanName: '', boothNumber: '', meterReading: '', photo: null, photoPreview: null });
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err) {
       console.error('Error starting shift:', err);
@@ -110,13 +114,14 @@ const SalesDashboard = () => {
       const shift = {
         id: `local_${Date.now()}`,
         salesmanName: formData.salesmanName,
+        boothNumber: formData.boothNumber,
         startReading: parseFloat(formData.meterReading),
         startTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         startDate: new Date().toLocaleDateString()
       };
       setActiveShift(shift);
       localStorage.setItem('activeShift', JSON.stringify(shift));
-      setFormData({ salesmanName: '', meterReading: '', photo: null, photoPreview: null });
+      setFormData({ salesmanName: '', boothNumber: '', meterReading: '', photo: null, photoPreview: null });
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
 
@@ -164,7 +169,7 @@ const SalesDashboard = () => {
     setActiveShift(null);
     localStorage.removeItem('activeShift');
     setShowConfirmation(false);
-    setFormData({ salesmanName: '', meterReading: '', photo: null, photoPreview: null });
+    setFormData({ salesmanName: '', boothNumber: '', meterReading: '', photo: null, photoPreview: null });
     if (fileInputRef.current) fileInputRef.current.value = '';
     setIsSubmitting(false);
     setShowSuccess(true);
@@ -252,6 +257,37 @@ const SalesDashboard = () => {
             </div>
           </div>
 
+          <div style={{ marginBottom: '20px' }}>
+            <label className="input-label">Select Booth / Dispenser</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+              {BOOTHS.map(num => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => setFormData({ ...formData, boothNumber: String(num) })}
+                  style={{
+                    padding: '14px 8px',
+                    borderRadius: '12px',
+                    border: '2px solid',
+                    borderColor: formData.boothNumber === String(num) ? 'var(--primary)' : 'var(--border)',
+                    background: formData.boothNumber === String(num) ? 'rgba(0, 210, 106, 0.15)' : 'var(--surface-hover)',
+                    color: formData.boothNumber === String(num) ? 'var(--primary)' : 'var(--text-main)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '6px',
+                    transition: 'all 0.2s',
+                    fontWeight: formData.boothNumber === String(num) ? 700 : 400
+                  }}
+                >
+                  <Fuel size={18} />
+                  <span style={{ fontSize: '0.85rem' }}>Booth {num}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div style={{ marginBottom: '24px' }}>
             <label className="input-label">Starting Meter Reading</label>
             <input
@@ -324,7 +360,7 @@ const SalesDashboard = () => {
             type="submit"
             className="btn btn-primary"
             style={{ width: '100%', padding: '16px', fontSize: '1.1rem' }}
-            disabled={isSubmitting || !formData.photoPreview}
+            disabled={isSubmitting || !formData.photoPreview || !formData.boothNumber}
           >
             {isSubmitting ? 'Starting Shift...' : 'Start Shift'}
           </button>
@@ -350,6 +386,10 @@ const SalesDashboard = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>
               <span style={{ color: 'var(--text-muted)' }}>Salesman</span>
               <span style={{ fontWeight: 600 }}>{activeShift.salesmanName}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Booth</span>
+              <span style={{ fontWeight: 600 }}>Booth {activeShift.boothNumber}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>
               <span style={{ color: 'var(--text-muted)' }}>Starting Meter</span>
@@ -391,7 +431,7 @@ const SalesDashboard = () => {
             display: 'flex', justifyContent: 'space-between', alignItems: 'center'
           }}>
             <div>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Active Shift</p>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Active Shift — Booth {activeShift.boothNumber}</p>
               <p style={{ fontWeight: 600, fontSize: '1.1rem' }}>{activeShift.salesmanName}</p>
             </div>
             <div style={{ textAlign: 'right' }}>
